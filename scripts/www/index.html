@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    
+    <!-- ========== PWA 核心配置 ========== -->
+    <link rel="manifest" href="./manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="营养计算器">
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+
+    <!-- 注册 Service Worker -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js')
+            .then(() => console.log('SW 注册成功'))
+            .catch(err => console.log('SW 注册失败:', err));
+        }
+    </script>
+
+    <title>【2025版】预包装食品营养成分表计算器 | 专业合规验证版</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        /* ========== 全局重置 ========== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        html, body {
+            overscroll-behavior: none;
+            user-select: none;
+            -webkit-user-select: none;
+            background: #edf1f7;
+            min-height: 100vh;
+            padding: 3px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        input, textarea {
+            user-select: text;
+            -webkit-user-select: text;
+            font-size: 16px !important;
+        }
+
+        /* ========== 主容器 ========== */
+        .container {
+            width: 100%;
+            background: #ffffff;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12), 0 8px 16px rgba(0, 0, 0, 0.06);
+            overflow: hidden;
+            margin: 1% auto;
+            border: 1px solid rgba(255,255,255,0.5);
+            backdrop-filter: blur(10px);
+            position: relative;       /* 必须：让绝对定位的 .page 以此为基准 */
+            min-height: 100px;
+        }
+
+        /* ========== 顶部 Header ========== */
+        header {
+            background: linear-gradient(135deg, #1a5fb4 0%, #2a7bc8 100%);
+            color: white;
+            padding: 18px 16px 14px;
+            text-align: center;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 4px 12px rgba(26, 95, 180, 0.3);
+            position: relative;
+            z-index: 2;
+        }
+        .main-title {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            line-height: 1.3;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.15);
+        }
+        .sub-title {
+            font-size: 13px;
+            font-weight: 300;
+            opacity: 0.95;
+            margin-top: 6px;
+            letter-spacing: 0.3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+
+        /* ========== 页面切换动画 ========== */
+        .page {
+            position: absolute;
+            width: 100%;
+            left: 0;
+            top: 0;
+            padding: 16px 16px 20px;
+            opacity: 0;
+            transform: translateY(8px);
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            pointer-events: none;
+        }
+        .page.active {
+            position: relative;
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+            z-index: 1;
+        }
+
+        /* ========== 录入页 ========== */
+        .section-title {
+            font-size: 18px;
+            color: #1a5fb4;
+            font-weight: 600;
+            text-align: center;
+            margin-bottom: 16px;
+            border-bottom: 2px solid #e9f0f9;
+            padding-bottom: 8px;
+        }
+
+        /* 食品类型选择 */
+        .food-type .radio-group {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            justify-content: center;
+        }
+        .radio-option {
+            flex: 1;
+            max-width: 160px;
+            border: 2px solid transparent;
+            border-radius: 14px;
+            padding: 12px 4px;
+            text-align: center;
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: #f2f5fa;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+            color: #4a5568;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .radio-option.selected {
+            border-color: #1a5fb4;
+            background: #ffffff;
+            box-shadow: 0 6px 16px rgba(26, 95, 180, 0.18);
+            font-weight: 600;
+            color: #1a5fb4;
+            transform: translateY(-1px);
+        }
+        .radio-option:active {
+            transform: scale(0.97);
+        }
+        .radio-option input {
+            display: none;
+        }
+
+        /* 输入区域 */
+        .nutrient-inputs {
+            background: #f7f9fc;
+            border-radius: 16px;
+            padding: 12px 0;
+            box-shadow: inset 0 1px 5px rgba(0,0,0,0.04);
+            margin-bottom: 20px;
+            border: 1px solid #eef2f6;
+        }
+        .input-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 85%;
+            margin: 0 auto;
+            padding: 2px 0;
+            border-bottom: 1px solid rgba(0,0,0,0.03);
+        }
+        .input-row:last-child {
+            border-bottom: none;
+        }
+        .input-row label {
+            font-weight: 500;
+            color: #2d3748;
+            font-size: 15px;
+            text-align: left;
+            white-space: nowrap;
+            flex-shrink: 0;
+            margin-right: 8px;
+            min-width: 70px;
+        }
+        .input-wrap {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        .input-row input {
+            width: 100px;
+            padding: 8px 10px;
+            border: 1px solid #d1d9e6;
+            border-radius: 10px;
+            font-size: 16px;
+            background: white;
+            transition: all 0.2s;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+            color: #1a202c;
+            font-weight: 500;
+        }
+        .input-row input:focus {
+            outline: none;
+            border-color: #1a5fb4;
+            box-shadow: 0 0 0 3px rgba(26, 95, 180, 0.15);
+        }
+        .input-row .unit {
+            font-size: 14px;
+            color: #5a6b7a;
+            font-weight: 500;
+            width: 24px;
+            text-align: left;
+            flex-shrink: 0;
+        }
+
+        /* 提示与toast */
+        .warning-text, .type-warning-text {
+            color: #c92a2a;
+            font-weight: 500;
+            font-size: 13px;
+            background: #fff5f5;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border-left: 4px solid #c92a2a;
+            display: none;
+            margin: 12px 0 8px;
+            line-height: 1.5;
+            box-shadow: 0 2px 8px rgba(201,42,42,0.08);
+        }
+        .type-warning-text {
+            margin: 0 0 16px;
+        }
+
+        /* Toast 浮动提示 */
+        .toast {
+            display: none;
+            position: fixed;
+            top: 20%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.85);
+            color: #fff;
+            padding: 16px 24px;
+            border-radius: 30px;
+            font-size: 16px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            z-index: 1000;
+            white-space: nowrap;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+            backdrop-filter: blur(10px);
+            animation: toastIn 0.3s ease;
+            pointer-events: auto;
+        }
+        @keyframes toastIn {
+            from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+            to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        }
+
+        /* 按钮组 */
+        .button-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin: 16px 0 4px;
+        }
+        .calculate-btn, .clear-btn {
+            flex: 1 1 130px;
+            min-width: 100px;
+            border: none;
+            border-radius: 14px;
+            padding: 14px 10px;
+            font-size: 17px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: center;
+            color: white;
+            letter-spacing: 0.6px;
+            box-shadow: 0 6px 14px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+            text-shadow: 0 1px 2px rgba(0,0,0,0.15);
+        }
+        .calculate-btn {
+            background: linear-gradient(180deg, #1a5fb4 0%, #0f3d7a 100%);
+        }
+        .calculate-btn:hover {
+            background: linear-gradient(180deg, #1e6cc4 0%, #134a8a 100%);
+            box-shadow: 0 8px 18px rgba(26, 95, 180, 0.35), 0 3px 6px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+            transform: translateY(-1px);
+        }
+        .calculate-btn:active {
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.1);
+            transform: translateY(1px);
+            background: linear-gradient(180deg, #0f3d7a 0%, #1a5fb4 100%);
+        }
+        .clear-btn {
+            background: linear-gradient(180deg, #8795a8 0%, #5d6d7e 100%);
+        }
+        .clear-btn:hover {
+            background: linear-gradient(180deg, #95a3b5 0%, #6b7b8c 100%);
+            box-shadow: 0 8px 18px rgba(90, 105, 120, 0.3), 0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2);
+            transform: translateY(-1px);
+        }
+        .clear-btn:active {
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.1);
+            transform: translateY(1px);
+            background: linear-gradient(180deg, #5d6d7e 0%, #8795a8 100%);
+        }
+
+        /* ========== 结果页 ========== */
+        .result-title {
+            font-size: 18px;
+            color: #1a5fb4;
+            font-weight: 600;
+            text-align: center;
+            border-bottom: 2px solid #e9f0f9;
+            padding-bottom: 8px;
+            margin-bottom: 16px;
+        }
+        .nutrition-table {
+            width: 100%;
+            border-collapse: collapse;
+            border: 2px solid #1a5fb4;
+            background: white;
+            font-size: 15px;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+        }
+        .nutrition-table th {
+            background: #1a5fb4;
+            color: white;
+            font-weight: 600;
+            padding: 10px 4px;
+            text-align: center;
+            font-size: 17px;
+        }
+        .nutrition-table td {
+            padding: 8px 4px;
+            vertical-align: middle;
+        }
+.nutrition-table td:first-child {
+    padding-left: 1em;
+}
+.nutrition-table td:nth-child(2) {
+    text-align: right;   /* 第二列（数值）右对齐 */
+    padding-right: 12px;
+}
+.nutrition-table td:nth-child(3) {
+    text-align: center;  /* 第三列（NRV%）居中 */
+}
+        .nutrition-table .project-row td {
+            background: #f0f5ff;
+            border-bottom: 2px solid #1a5fb4;
+        }
+        .bold-row td {
+            font-weight: 700 !important;
+        }
+        .footer-note {
+            padding: 8px 12px 8px 2em;
+            background: #f0f7ff;
+            font-size: 13px;
+            border-top: 1px solid #d1e0ff;
+            margin-top: 8px;
+            color: #2d3748;
+            border-radius: 0 0 12px 12px;
+        }
+        .standard-note, .creator-note, .disclaimer-note {
+            font-size: 12px;
+            color: #718096;
+            text-align: center;
+            margin-top: 8px;
+        }
+        .disclaimer-note {
+            text-align: left;
+            font-size: 11px;
+            color: #a0aec0;
+            line-height: 1.5;
+        }
+        .version-info {
+            text-align: center;
+            font-size: 12px;
+            color: #718096;
+            margin-top: 12px;
+            line-height: 1.7;
+        }
+        .result-warning-text {
+            color: #c92a2a;
+            font-weight: 500;
+            font-size: 13px;
+            background: #fff5f5;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border-left: 4px solid #c92a2a;
+            display: none;
+            margin: 12px 0;
+            box-shadow: 0 2px 8px rgba(201,42,42,0.08);
+        }
+        .back-btn {
+            background: linear-gradient(180deg, #6c8c9c 0%, #4a6a7a 100%);
+            margin: 16px auto 0;
+            display: block;
+            width: 60%;
+            max-width: 180px;
+            border: none;
+            border-radius: 14px;
+            padding: 14px 5px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: center;
+            color: white;
+            letter-spacing: 0.5px;
+            box-shadow: 0 6px 14px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.2);
+        }
+        .back-btn:active {
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.2);
+            transform: translateY(1px);
+        }
+
+        @media (max-width: 380px) {
+            .radio-option { font-size: 13px; padding: 10px 2px; }
+        }
+        .radio-option, button, .back-btn, .calculate-btn, .clear-btn {
+            -webkit-tap-highlight-color: transparent;
+        }
+        @media (min-width: 600px) {
+            .input-row input { width: 120px; }
+            .container { margin-top: 10px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <div class="main-title">【2025版】食品营养成分计算器</div>
+        <div class="sub-title"><b>⚖️</b> 食安伴💎依据 GB 28050-2025 标准制作 <b>⚖️</b></div>
+    </header>
+
+    <!-- 输入页 -->
+    <div id="pageInput" class="page active">
+        <div class="section-title">营养成分数据输入</div>
+        <div class="food-type">
+            <div class="radio-group">
+                <div class="radio-option" id="solidOption">
+                    <input type="radio" name="foodType" value="solid"> 固态（每100克）
+                </div>
+                <div class="radio-option" id="liquidOption">
+                    <input type="radio" name="foodType" value="liquid"> 液态（每100毫升）
+                </div>
+            </div>
+            <div id="typeWarning" class="type-warning-text" style="display:none;">⚠️ 请先选择（固态/液态）确认食品类型。</div>
+        </div>
+
+        <div class="nutrient-inputs">
+            <div class="input-row"><label>蛋白质</label><span class="input-wrap"><input type="number" id="protein" min="0" step="0.1" value=""><span class="unit">g</span></span></div>
+            <div class="input-row"><label>脂肪</label><span class="input-wrap"><input type="number" id="fat" min="0" step="0.1" value=""><span class="unit">g</span></span></div>
+            <div class="input-row"><label>饱和脂肪</label><span class="input-wrap"><input type="number" id="saturatedFat" min="0" step="0.1" value=""><span class="unit">g</span></span></div>
+            <div class="input-row"><label>碳水化合物</label><span class="input-wrap"><input type="number" id="carbohydrate" min="0" step="0.1" value=""><span class="unit">g</span></span></div>
+            <div class="input-row"><label>糖</label><span class="input-wrap"><input type="number" id="sugar" min="0" step="0.1" value=""><span class="unit">g</span></span></div>
+            <div class="input-row"><label>膳食纤维</label><span class="input-wrap"><input type="number" id="dietaryFiber" min="0" step="0.1" value="" placeholder="选填"><span class="unit">g</span></span></div>
+            <div class="input-row"><label>钠</label><span class="input-wrap"><input type="number" id="sodium" min="0" step="1" value=""><span class="unit">mg</span></span></div>
+            <div id="dataWarning" class="warning-text"></div>
+        </div>
+
+        <div class="button-group">
+            <button id="calculateBtn" class="calculate-btn">营养成分计算</button>
+            <button id="clearBtn" class="clear-btn">清空数据</button>
+        </div>
+    </div>
+
+    <!-- 结果页 -->
+    <div id="pageResult" class="page">
+        <div class="result-title">营养成分表展示</div>
+        <div class="result-content">
+            <table class="nutrition-table">
+                <thead><tr><th colspan="3">营养成分表</th></tr></thead>
+                <tbody>
+                    <tr class="project-row">
+                        <td style="text-align:center;">项目</td>
+                        <td style="text-align:center;" id="unitHeaderCell">每100克(g)</td>
+                        <td style="text-align:center;">NRV%</td>
+                    </tr>
+                    <tr id="energyRow"><td>能量</td><td id="energyValue">—</td><td id="energyNrv">—</td></tr>
+                    <tr id="proteinRow"><td>蛋白质</td><td id="proteinValue">—</td><td id="proteinNrv">—</td></tr>
+                    <tr id="fatRow"><td>脂肪</td><td id="fatValue">—</td><td id="fatNrv">—</td></tr>
+                    <tr id="saturatedFatRow"><td>—饱和脂肪</td><td id="saturatedFatValue">—</td><td id="saturatedFatNrv">—</td></tr>
+                    <tr id="carbohydrateRow"><td>碳水化合物</td><td id="carbohydrateValue">—</td><td id="carbohydrateNrv">—</td></tr>
+                    <tr id="sugarRow"><td>—糖</td><td id="sugarValue">—</td><td></td></tr>
+                    <tr id="dietaryFiberRow" style="display:none;"><td>膳食纤维</td><td id="dietaryFiberValue">—</td><td id="dietaryFiberNrv">—</td></tr>
+                    <tr id="sodiumRow"><td>钠</td><td id="sodiumValue">—</td><td id="sodiumNrv">—</td></tr>
+                </tbody>
+            </table>
+            <div class="footer-note">儿童青少年应避免过量摄入盐油糖。</div>
+            <div id="resultWarning" class="result-warning-text"></div>
+            <div class="creator-note">制作人：朱长伸（公众号“食安伴”）</div>
+            <div class="disclaimer-note">免责声明：本计算器为满足个人需求设计开发，结果仅供参考。</div>
+            <div class="version-info"><div class="v1">| 版本：20260526V1.0 |</div></div>
+            <button id="backBtn" class="back-btn">← 返回录入</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast 提示 -->
+<div id="toast" class="toast">🚨 请先选择(固态｜液态)确认食品类型！</div>
+
+<script>
+    (function() {
+        // ========== DOM 元素 ==========
+        const proteinInput = document.getElementById('protein');
+        const fatInput = document.getElementById('fat');
+        const saturatedFatInput = document.getElementById('saturatedFat');
+        const carbohydrateInput = document.getElementById('carbohydrate');
+        const sugarInput = document.getElementById('sugar');
+        const dietaryFiberInput = document.getElementById('dietaryFiber');
+        const sodiumInput = document.getElementById('sodium');
+        const calculateBtn = document.getElementById('calculateBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const dataWarning = document.getElementById('dataWarning');
+        const resultWarning = document.getElementById('resultWarning');
+        const typeWarning = document.getElementById('typeWarning');
+        const toast = document.getElementById('toast');
+
+        const unitHeaderCell = document.getElementById('unitHeaderCell');
+        const energyValue = document.getElementById('energyValue');
+        const energyNrv = document.getElementById('energyNrv');
+        const proteinValue = document.getElementById('proteinValue');
+        const proteinNrv = document.getElementById('proteinNrv');
+        const fatValue = document.getElementById('fatValue');
+        const fatNrv = document.getElementById('fatNrv');
+        const saturatedFatValue = document.getElementById('saturatedFatValue');
+        const saturatedFatNrv = document.getElementById('saturatedFatNrv');
+        const carbohydrateValue = document.getElementById('carbohydrateValue');
+        const carbohydrateNrv = document.getElementById('carbohydrateNrv');
+        const sugarValue = document.getElementById('sugarValue');
+        const dietaryFiberValue = document.getElementById('dietaryFiberValue');
+        const dietaryFiberNrv = document.getElementById('dietaryFiberNrv');
+        const dietaryFiberRow = document.getElementById('dietaryFiberRow');
+        const sodiumValue = document.getElementById('sodiumValue');
+        const sodiumNrv = document.getElementById('sodiumNrv');
+
+        const energyRow = document.getElementById('energyRow');
+        const proteinRow = document.getElementById('proteinRow');
+        const fatRow = document.getElementById('fatRow');
+        const saturatedFatRow = document.getElementById('saturatedFatRow');
+        const carbohydrateRow = document.getElementById('carbohydrateRow');
+        const sugarRow = document.getElementById('sugarRow');
+        const sodiumRow = document.getElementById('sodiumRow');
+
+        const pageInput = document.getElementById('pageInput');
+        const pageResult = document.getElementById('pageResult');
+        const backBtn = document.getElementById('backBtn');
+
+        // ========== NRV 常量 ==========
+        const NRV = { energy: 8400, protein: 60, fat: 60, saturatedFat: 20, carbohydrate: 300, dietaryFiber: 25, sodium: 2000 };
+        const ZERO_LIMIT = { energy: 17, protein: 0.5, fat: 0.5, saturatedFat: 0.1, carbohydrate: 0.5, sugar: 0.5, dietaryFiber: 0.5, sodium: 5 };
+        const ROUNDING_INTERVAL = { energy: 1, protein: 0.1, fat: 0.1, saturatedFat: 0.1, carbohydrate: 0.1, sugar: 0.1, dietaryFiber: 0.1, sodium: 1 };
+
+        // ========== 状态 ==========
+        let isFoodTypeManuallySelected = false;
+        const solidOptionDiv = document.getElementById('solidOption');
+        const liquidOptionDiv = document.getElementById('liquidOption');
+
+        function setFoodTypeSelected(type) {
+            isFoodTypeManuallySelected = true;
+            if (type === 'solid') {
+                solidOptionDiv.classList.add('selected');
+                liquidOptionDiv.classList.remove('selected');
+                document.querySelector('input[name="foodType"][value="solid"]').checked = true;
+                unitHeaderCell.textContent = '每100克(g)';
+            } else {
+                liquidOptionDiv.classList.add('selected');
+                solidOptionDiv.classList.remove('selected');
+                document.querySelector('input[name="foodType"][value="liquid"]').checked = true;
+                unitHeaderCell.textContent = '每100毫升(mL)';
+            }
+            typeWarning.style.display = 'none';
+        }
+
+        solidOptionDiv.addEventListener('click', () => setFoodTypeSelected('solid'));
+        liquidOptionDiv.addEventListener('click', () => setFoodTypeSelected('liquid'));
+
+        // ========== 辅助函数 ==========
+        function clearTableData() {
+            energyValue.textContent = '—';
+            energyNrv.textContent = '—';
+            proteinValue.textContent = '—';
+            proteinNrv.textContent = '—';
+            fatValue.textContent = '—';
+            fatNrv.textContent = '—';
+            saturatedFatValue.textContent = '—';
+            saturatedFatNrv.textContent = '—';
+            carbohydrateValue.textContent = '—';
+            carbohydrateNrv.textContent = '—';
+            sugarValue.textContent = '—';
+            sodiumValue.textContent = '—';
+            sodiumNrv.textContent = '—';
+            dietaryFiberValue.textContent = '—';
+            dietaryFiberNrv.textContent = '—';
+            dietaryFiberRow.style.display = 'none';
+            removeBoldFromAllRows();
+        }
+
+        function removeBoldFromAllRows() {
+            [energyRow, proteinRow, fatRow, saturatedFatRow, carbohydrateRow, sugarRow, sodiumRow].forEach(row => {
+                if (row) row.classList.remove('bold-row');
+            });
+        }
+
+        function addBoldToRow(row) { if (row) row.classList.add('bold-row'); }
+
+        function preciseRound(value, decimals) {
+            const factor = Math.pow(10, decimals);
+            return Math.round(parseFloat((value * factor).toFixed(11))) / factor;
+        }
+
+        function roundValue(value, interval) {
+            value = Number(value.toFixed(10));
+            return interval === 1 ? Math.round(value) : (interval === 0.1 ? preciseRound(value, 1) : value);
+        }
+
+        function applyZeroLimitAndRound(value, nutrientType) {
+            const rounded = roundValue(value, ROUNDING_INTERVAL[nutrientType]);
+            return rounded <= ZERO_LIMIT[nutrientType] ? 0 : rounded;
+        }
+
+        function calculateNrvPercent(value, nutrient) {
+            return Math.round((value / NRV[nutrient]) * 100);
+        }
+
+function formatValue(value, unit, decimalPlaces, zeroLimit) {
+    let displayUnit = unit;
+    if (unit === 'kJ') displayUnit = '千焦（kJ）';
+    else if (unit === 'g') displayUnit = '克（g）';
+    else if (unit === 'mg') displayUnit = '毫克（mg）';
+    if (value <= zeroLimit) return `0 ${displayUnit}`;
+    return value.toFixed(decimalPlaces) + ` ${displayUnit}`;
+}
+
+        function getLeadingZeroErrors() {
+            const inputs = [
+                { el: proteinInput, name: '蛋白质' }, { el: fatInput, name: '脂肪' },
+                { el: saturatedFatInput, name: '饱和脂肪' }, { el: carbohydrateInput, name: '碳水化合物' },
+                { el: sugarInput, name: '糖' }, { el: sodiumInput, name: '钠' },
+                { el: dietaryFiberInput, name: '膳食纤维' }
+            ];
+            return inputs.filter(inp => {
+                const v = inp.el.value.trim();
+                return v.length > 1 && v[0] === '0' && v[1] !== '.';
+            }).map(inp => inp.name);
+        }
+
+        // ========== 核心验证 ==========
+        function validateNutrientData(protein, fat, saturatedFat, carbohydrate, sugar, dietaryFiber, sodium, hasDietaryFiber) {
+            const errors = [];
+            if (protein < 0) errors.push('蛋白质数值不能为负数');
+            if (fat < 0) errors.push('脂肪数值不能为负数');
+            if (saturatedFat < 0) errors.push('饱和脂肪数值不能为负数');
+            if (carbohydrate < 0) errors.push('碳水化合物数值不能为负数');
+            if (sugar < 0) errors.push('糖数值不能为负数');
+            if (hasDietaryFiber && dietaryFiber < 0) errors.push('膳食纤维数值不能为负数');
+            if (sodium < 0) errors.push('钠数值不能为负数');
+
+            const saltEq = sodium * 2.5 / 1000;
+            const totalMass = protein + fat + carbohydrate + (hasDietaryFiber ? dietaryFiber : 0) + saltEq;
+            if (totalMass > 100) errors.push(`【质量守恒】总质量 ${totalMass.toFixed(2)}g > 100g`);
+
+            const energyCalculated = protein * 17 + fat * 37 + carbohydrate * 17 + (hasDietaryFiber ? dietaryFiber : 0) * 8;
+            if (energyCalculated > 3700) errors.push(`【能量上限】计算能量 ${energyCalculated.toFixed(1)} kJ 超限`);
+
+            if (sodium > 40000) errors.push('【钠含量极值】请检查单位是否为毫克');
+            if (sugar > carbohydrate) errors.push('糖不能大于碳水化合物');
+            if (fat < 0.55 && saturatedFat >= 0.55) errors.push('脂肪与饱和脂肪数据矛盾');
+            else if (fat >= 0.55 && saturatedFat > fat) errors.push('饱和脂肪不能大于总脂肪');
+
+            return { isValid: errors.length === 0, errors };
+        }
+
+        // ========== 计算与更新 ==========
+        function performCalculationAndUpdate() {
+            const getVal = el => parseFloat(el.value) || 0;
+            const proteinRaw = getVal(proteinInput), fatRaw = getVal(fatInput), saturatedFatRaw = getVal(saturatedFatInput);
+            const carbohydrateRaw = getVal(carbohydrateInput), sugarRaw = getVal(sugarInput), sodiumRaw = getVal(sodiumInput);
+            const dietaryFiberRaw = dietaryFiberInput.value === '' ? NaN : parseFloat(dietaryFiberInput.value);
+            const hasDietaryFiber = !isNaN(dietaryFiberRaw) && dietaryFiberInput.value !== '';
+            const dietaryFiberVal = hasDietaryFiber ? dietaryFiberRaw : 0;
+
+            const rounded = {
+                protein: applyZeroLimitAndRound(proteinRaw, 'protein'),
+                fat: applyZeroLimitAndRound(fatRaw, 'fat'),
+                saturatedFat: applyZeroLimitAndRound(saturatedFatRaw, 'saturatedFat'),
+                carbohydrate: applyZeroLimitAndRound(carbohydrateRaw, 'carbohydrate'),
+                sugar: applyZeroLimitAndRound(sugarRaw, 'sugar'),
+                dietaryFiber: hasDietaryFiber ? applyZeroLimitAndRound(dietaryFiberVal, 'dietaryFiber') : 0,
+                sodium: applyZeroLimitAndRound(sodiumRaw, 'sodium')
+            };
+            const energy = rounded.protein * 17 + rounded.fat * 37 + rounded.carbohydrate * 17 + rounded.dietaryFiber * 8;
+            rounded.energy = applyZeroLimitAndRound(energy, 'energy');
+
+            energyValue.textContent = formatValue(rounded.energy, 'kJ', 0, ZERO_LIMIT.energy);
+            energyNrv.textContent = calculateNrvPercent(rounded.energy, 'energy') + '%';
+            proteinValue.textContent = formatValue(rounded.protein, 'g', 1, ZERO_LIMIT.protein);
+            proteinNrv.textContent = calculateNrvPercent(rounded.protein, 'protein') + '%';
+            fatValue.textContent = formatValue(rounded.fat, 'g', 1, ZERO_LIMIT.fat);
+            fatNrv.textContent = calculateNrvPercent(rounded.fat, 'fat') + '%';
+            saturatedFatValue.textContent = formatValue(rounded.saturatedFat, 'g', 1, ZERO_LIMIT.saturatedFat);
+            saturatedFatNrv.textContent = calculateNrvPercent(rounded.saturatedFat, 'saturatedFat') + '%';
+            carbohydrateValue.textContent = formatValue(rounded.carbohydrate, 'g', 1, ZERO_LIMIT.carbohydrate);
+            carbohydrateNrv.textContent = calculateNrvPercent(rounded.carbohydrate, 'carbohydrate') + '%';
+            sugarValue.textContent = formatValue(rounded.sugar, 'g', 1, ZERO_LIMIT.sugar);
+            const sugarNrvCell = document.querySelector('#sugarRow td:last-child');
+            if (sugarNrvCell) sugarNrvCell.textContent = '';
+            sodiumValue.textContent = formatValue(rounded.sodium, 'mg', 0, ZERO_LIMIT.sodium);
+            sodiumNrv.textContent = calculateNrvPercent(rounded.sodium, 'sodium') + '%';
+
+            if (hasDietaryFiber) {
+                dietaryFiberValue.textContent = formatValue(rounded.dietaryFiber, 'g', 1, ZERO_LIMIT.dietaryFiber);
+                dietaryFiberNrv.textContent = calculateNrvPercent(rounded.dietaryFiber, 'dietaryFiber') + '%';
+                dietaryFiberRow.style.display = '';
+            } else {
+                dietaryFiberRow.style.display = 'none';
+            }
+
+            removeBoldFromAllRows();
+            if (hasDietaryFiber) {
+                [energyRow, proteinRow, fatRow, saturatedFatRow, carbohydrateRow, sugarRow, sodiumRow].forEach(addBoldToRow);
+            }
+        }
+
+        // ========== 页面切换动画（修复 pointer-events 残留） ==========
+        function switchPage(fromPage, toPage) {
+            if (!fromPage || !toPage || fromPage === toPage) return;
+
+            // 先把即将离场的页面冻结
+            fromPage.style.pointerEvents = 'none';
+            fromPage.style.opacity = '0';
+            fromPage.style.transform = 'translateY(-8px)';
+
+            // 同时清除即将入场页面的所有可能造成干扰的内联样式
+            toPage.style.pointerEvents = '';   // 关键：清除上次残留的 none
+            toPage.style.opacity = '';
+            toPage.style.transform = '';
+            toPage.style.transition = '';
+
+            const onTransitionEnd = () => {
+                fromPage.classList.remove('active');
+                fromPage.style.pointerEvents = '';   // 离场后也清除
+                fromPage.style.opacity = '';
+                fromPage.style.transform = '';
+                fromPage.removeEventListener('transitionend', onTransitionEnd);
+
+                // 显示新页面
+                toPage.classList.add('active');
+                // 强制重绘后执行入场动画
+                requestAnimationFrame(() => {
+                    toPage.style.opacity = '0';
+                    toPage.style.transform = 'translateY(8px)';
+                    requestAnimationFrame(() => {
+                        toPage.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+                        toPage.style.opacity = '1';
+                        toPage.style.transform = 'translateY(0)';
+                        // 动画结束后清理
+                        const cleanup = () => {
+                            toPage.style.transition = '';
+                            toPage.removeEventListener('transitionend', cleanup);
+                        };
+                        toPage.addEventListener('transitionend', cleanup);
+                    });
+                });
+            };
+
+            fromPage.addEventListener('transitionend', onTransitionEnd);
+            // 兜底：如果 transitionend 没触发（比如旧页面原本就是隐藏状态）
+            setTimeout(() => {
+                if (fromPage.classList.contains('active')) {
+                    onTransitionEnd();
+                }
+            }, 300);
+        }
+
+        // ========== Toast 提示 ==========
+        function showToast(msg) {
+            toast.textContent = msg;
+            toast.style.display = 'block';
+            clearTimeout(toast._timeout);
+            toast._timeout = setTimeout(() => { toast.style.display = 'none'; }, 2500);
+        }
+        toast.addEventListener('click', () => { toast.style.display = 'none'; });
+
+        // ========== 主计算入口 ==========
+        function calculateNutrition() {
+            if (!isFoodTypeManuallySelected) {
+                typeWarning.style.display = 'block';
+                showToast('🚨 请先选择(固态｜液态)确认食品类型！');
+                return;
+            }
+            typeWarning.style.display = 'none';
+
+            const leadingZeroErrors = getLeadingZeroErrors();
+            if (leadingZeroErrors.length) {
+                const msg = `【数据格式】以下字段前导零错误：${leadingZeroErrors.join('、')}`;
+                dataWarning.innerHTML = `<strong>⚠️ ${msg}</strong>`;
+                resultWarning.innerHTML = `<strong>⚠️ ${msg}</strong>`;
+                dataWarning.style.display = 'block';
+                resultWarning.style.display = 'block';
+                clearTableData();
+                return;
+            }
+
+            const proteinRaw = parseFloat(proteinInput.value) || 0;
+            const fatRaw = parseFloat(fatInput.value) || 0;
+            const saturatedFatRaw = parseFloat(saturatedFatInput.value) || 0;
+            const carbohydrateRaw = parseFloat(carbohydrateInput.value) || 0;
+            const sugarRaw = parseFloat(sugarInput.value) || 0;
+            const sodiumRaw = parseFloat(sodiumInput.value) || 0;
+            const dietaryFiberRaw = dietaryFiberInput.value === '' ? NaN : parseFloat(dietaryFiberInput.value);
+            const hasDietaryFiber = !isNaN(dietaryFiberRaw) && dietaryFiberInput.value !== '';
+            const dietaryFiberVal = hasDietaryFiber ? dietaryFiberRaw : 0;
+
+            const validation = validateNutrientData(proteinRaw, fatRaw, saturatedFatRaw, carbohydrateRaw, sugarRaw, dietaryFiberVal, sodiumRaw, hasDietaryFiber);
+            if (!validation.isValid) {
+                const errHtml = '<strong>⚠️ 数据校验失败：</strong><br>' + validation.errors.map(e => `• ${e}`).join('<br>');
+                dataWarning.innerHTML = errHtml;
+                resultWarning.innerHTML = errHtml;
+                dataWarning.style.display = 'block';
+                resultWarning.style.display = 'block';
+                clearTableData();
+                return;
+            }
+
+            dataWarning.style.display = 'none';
+            resultWarning.style.display = 'none';
+            performCalculationAndUpdate();
+
+            switchPage(pageInput, pageResult);
+            history.pushState({ page: 'result' }, '');
+        }
+
+        function goBackToInput() {
+            if (pageResult.classList.contains('active')) {
+                switchPage(pageResult, pageInput);
+                resultWarning.style.display = 'none';
+                history.pushState({ page: 'input' }, '');
+            }
+        }
+
+        backBtn.addEventListener('click', goBackToInput);
+
+        clearBtn.addEventListener('click', () => {
+            proteinInput.value = fatInput.value = saturatedFatInput.value = carbohydrateInput.value = sugarInput.value = dietaryFiberInput.value = sodiumInput.value = '';
+            dataWarning.style.display = 'none';
+            resultWarning.style.display = 'none';
+            clearTableData();
+            if (pageResult.classList.contains('active')) {
+                switchPage(pageResult, pageInput);
+                history.pushState({ page: 'input' }, '');
+            }
+        });
+
+        calculateBtn.addEventListener('click', calculateNutrition);
+
+        // ========== 返回键拦截 ==========
+        window.addEventListener('popstate', (e) => {
+            if (pageResult.classList.contains('active')) {
+                switchPage(pageResult, pageInput);
+                resultWarning.style.display = 'none';
+                history.pushState({ page: 'input' }, '');
+            }
+        });
+
+        history.replaceState({ page: 'input' }, '');
+
+        // ========== 触感反馈 ==========
+        document.addEventListener('touchstart', () => {}, { passive: true });
+        document.querySelectorAll('button, .radio-option').forEach(el => {
+            el.addEventListener('touchstart', function() { this.style.opacity = '0.7'; }, { passive: true });
+            el.addEventListener('touchend', function() { this.style.opacity = '1'; }, { passive: true });
+            el.addEventListener('touchcancel', function() { this.style.opacity = '1'; }, { passive: true });
+        });
+
+        // 初始化
+        clearTableData();
+        typeWarning.style.display = 'block';
+        solidOptionDiv.classList.add('selected');
+        document.querySelector('input[name="foodType"][value="solid"]').checked = true;
+        isFoodTypeManuallySelected = false;
+    })();
+</script>
+</body>
+</html>
